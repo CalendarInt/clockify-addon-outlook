@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
 
-export async function POST(request: Request, response: Response) {
+export async function POST(request: Request) {
   return NextResponse.json({ response: "installed" });
 }
