@@ -12,7 +12,8 @@ import {
 } from "date-fns";
 
 const getBaseUrl = (workspaceId: string) => {
-  return process.env.NODE_ENV === "development"
+  console.log(`Current URL: ${window.location.href}`);
+  return process.env.NODE_ENV === "development" || window.location.href.includes('developer')
     ? `https://developer.clockify.me/report/v1/workspaces/${workspaceId}/reports/detailed`
     : `https://reports.api.clockify.me/v1/workspaces/${workspaceId}/reports/detailed`;
 };
