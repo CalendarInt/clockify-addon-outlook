@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/server";
-import axios, { AxiosError } from "axios";
+import axios from "axios";
 import { NextResponse } from "next/server";
 
 async function refreshAccessToken(refreshToken: string) {
@@ -25,7 +25,10 @@ async function refreshAccessToken(refreshToken: string) {
       access_token: response.data.access_token,
       refresh_token: response.data.refresh_token
     };
-  } catch (error) {
+  } catch (error: any) {
+    if (error.response?.data?.error === 'invalid_grant') {
+      throw new Error('refresh_token_expired');
+    }
     console.error('Error refreshing token:', error);
     throw error;
   }
@@ -45,47 +48,53 @@ export async function POST(request: Request) {
       .eq("id", body.userId as string);
     
     if (!user.data) {
-      console.error("User not found:", body.userId);
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
     scopedUser = user.data[0];
 
     if (!scopedUser?.provider?.azure?.connected) {
-      console.log("Azure calendar not connected for user:", body.userId);
-      return NextResponse.json({ error: "Azure calendar not connected" }, { status: 400 });
+      return NextResponse.json({ error: "Azure not connected" }, { status: 400 });
     }
 
-    if (!scopedUser.provider.azure.calendarId) {
-      console.error("Calendar ID not found for user:", body.userId);
-      return NextResponse.json({ error: "Calendar ID not found" }, { status: 400 });
-    }
-
-    // Get the existing event with this time entry ID
     try {
-      // Convert dates to handle timezone consistently
-      const startTime = new Date(body.timeInterval.start);
-      const endTime = new Date(body.timeInterval.end);
+      // Refresh token first
+      const tokens = await refreshAccessToken(scopedUser.provider.azure.refresh_token);
       
-      // Get events within the time range
-      let response = await axios.get(
+      // Update tokens in database
+      await supabase
+        .from("users")
+        .update({
+          provider: {
+            ...scopedUser.provider,
+            azure: {
+              ...scopedUser.provider.azure,
+              access_token: tokens.access_token,
+              refresh_token: tokens.refresh_token
+            },
+          },
+        })
+        .eq("id", body.userId);
+
+      // Get the existing event with this time entry ID
+      const eventsResponse = await axios.get(
         `https://graph.microsoft.com/v1.0/me/calendars/${scopedUser.provider.azure.calendarId}/events`,
         {
           headers: {
-            Authorization: `Bearer ${scopedUser.provider.azure.access_token}`,
+            Authorization: `Bearer ${tokens.access_token}`,
             "Content-Type": "application/json",
             Prefer: 'outlook.timezone="UTC"'
           },
           params: {
             $select: "id,subject,body,start,end",
-            $filter: `SingleValueExtendedProperties/any(ep: ep/id eq 'String {66f5a359-4659-4830-9070-00040ec6ac6e} Name clockifyId' and ep/value eq '${body.id}')`,
+            $filter: `SingleValueExtendedProperties/any(ep: ep/id eq 'String {66f5a359-4659-4830-9070-00040ec6ac6e} Name clockifyId' and ep/value eq '${body.id}')`
           }
         }
       );
 
-      console.log("Event response:", response.data);
+      console.log("Events response:", eventsResponse.data);
 
       // Find the event with matching ID in body content
-      const matchingEvent = response.data.value.find(
+      const matchingEvent = eventsResponse.data.value.find(
         (event: any) => event.body?.content?.includes(body.id)
       );
 
@@ -94,69 +103,75 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "Event not found" }, { status: 404 });
       }
 
-      // Update the existing event
-      try {
-        let updateResponse = await axios.patch(
-          `https://graph.microsoft.com/v1.0/me/calendars/${scopedUser.provider.azure.calendarId}/events/${matchingEvent.id}`,
-          {
-            start: {
-              dateTime: body.timeInterval.start,
-              timeZone: "UTC"
-            },
-            end: {
-              dateTime: body.timeInterval.end,
-              timeZone: "UTC"
-            }
-          },
-          {
-            headers: {
-              Authorization: `Bearer ${scopedUser.provider.azure.access_token}`,
-              "Content-Type": "application/json"
-            }
-          }
-        );
+      const startTime = new Date(body.timeInterval.start);
+      const endTime = new Date(body.timeInterval.end);
 
-        console.log("Event updated successfully:", updateResponse.data.id);
-        return NextResponse.json(updateResponse.data);
-      } catch (updateError) {
-        if (updateError instanceof AxiosError) {
-          console.error("Failed to update event:", {
-            status: updateError.response?.status,
-            data: updateError.response?.data,
-            error: updateError.message
-          });
-          
-          if (updateError.response?.status === 401) {
-            return NextResponse.json({ error: "Authentication failed" }, { status: 401 });
+      const client = body.project?.clientName ? `${body.project?.clientName} : ` : "";
+      const project = body.project?.name ?? "";
+      const task = body.task?.name ? ` : ${body.task?.name}` : "";
+      const description = body.description ? ` - ${body.description}` : "";
+
+      // Update the existing event
+      const updateResponse = await axios.patch(
+        `https://graph.microsoft.com/v1.0/me/calendars/${scopedUser.provider.azure.calendarId}/events/${matchingEvent.id}`,
+        {
+          subject: client + project + task + description,
+          start: {
+            dateTime: startTime.toISOString(),
+            timeZone: "UTC"
+          },
+          end: {
+            dateTime: endTime.toISOString(),
+            timeZone: "UTC"
           }
-          
-          return NextResponse.json(
-            { error: "Failed to update event", details: updateError.response?.data },
-            { status: updateError.response?.status || 500 }
-          );
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${tokens.access_token}`,
+            "Content-Type": "application/json",
+            Prefer: 'outlook.timezone="UTC"'
+          }
         }
-        throw updateError;
-      }
-    } catch (searchError) {
-      if (searchError instanceof AxiosError) {
-        console.error("Failed to search for event:", {
-          status: searchError.response?.status,
-          data: searchError.response?.data,
-          error: searchError.message
-        });
+      );
+
+      console.log("Event updated successfully:", updateResponse.data);
+      return NextResponse.json(updateResponse.data);
+    } catch (error: any) {
+      if (error.message === 'refresh_token_expired') {
+        console.log("Refresh token expired, disconnecting Azure...");
         
-        return NextResponse.json(
-          { error: "Failed to search for event", details: searchError.response?.data },
-          { status: searchError.response?.status || 500 }
-        );
+        await supabase
+          .from("users")
+          .update({
+            provider: {
+              ...scopedUser.provider,
+              azure: {
+                ...scopedUser.provider.azure,
+                connected: false,
+              },
+            },
+          })
+          .eq("id", body.userId);
+
+        return NextResponse.json({ 
+          error: "Azure session expired, please reconnect your account",
+          details: "Your Azure session has expired. Please reconnect your account to continue syncing with Outlook calendar."
+        }, { status: 401 });
       }
-      throw searchError;
+
+      console.error("API Error details:", {
+        status: error.response?.status,
+        data: error.response?.data,
+        headers: error.response?.headers
+      });
+
+      throw error;
     }
-  } catch (error) {
-    console.error("Unexpected error:", error);
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 }
-    );
+  } catch (error: any) {
+    console.error('Unexpected error:', error.response?.data || error);
+    return NextResponse.json({ 
+      error: "Failed to update calendar event",
+      details: error.message
+    }, { status: 500 });
   }
 }

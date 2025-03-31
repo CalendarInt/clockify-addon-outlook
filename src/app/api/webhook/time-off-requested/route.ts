@@ -4,29 +4,30 @@ import { NextResponse } from "next/server";
 
 async function refreshAccessToken(refreshToken: string) {
   try {
-    const tokenEndpoint = "https://login.microsoftonline.com/common/oauth2/v2.0/token";
+    const tokenEndpoint =
+      "https://login.microsoftonline.com/common/oauth2/v2.0/token";
     const params = new URLSearchParams({
       client_id: process.env.NEXT_PUBLIC_AZURE_CLIENT_ID!,
       refresh_token: refreshToken,
-      grant_type: 'refresh_token',
-      scope: 'offline_access Calendars.ReadWrite'
+      grant_type: "refresh_token",
+      scope: "offline_access Calendars.ReadWrite",
     });
 
     const response = await axios.post(tokenEndpoint, params, {
       headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Origin': process.env.NEXT_PUBLIC_REDIRECT_URI || "http://localhost:3000"
-      }
+        "Content-Type": "application/x-www-form-urlencoded",
+        Origin: process.env.NEXT_PUBLIC_REDIRECT_URI || "http://localhost:3000",
+      },
     });
 
-    console.log('Token refresh response:', response.data);
+    console.log("Token refresh response:", response.data);
 
     return {
       access_token: response.data.access_token,
-      refresh_token: response.data.refresh_token
+      refresh_token: response.data.refresh_token,
     };
   } catch (error) {
-    console.error('Error refreshing token:', error);
+    console.error("Error refreshing token:", error);
     throw error;
   }
 }
@@ -47,22 +48,27 @@ export async function POST(request: Request) {
       .from("users")
       .select()
       .eq("id", body.userId as string);
-    
+
     if (!user.data) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
     scopedUser = user.data[0];
 
     if (!scopedUser?.provider?.azure?.connected) {
-      return NextResponse.json({ error: "Azure not connected" }, { status: 400 });
+      return NextResponse.json(
+        { error: "Azure not connected" },
+        { status: 400 }
+      );
     }
 
     try {
       // Refresh token first
-      const tokens = await refreshAccessToken(scopedUser.provider.azure.refresh_token);
+      const tokens = await refreshAccessToken(
+        scopedUser.provider.azure.refresh_token
+      );
 
       console.log(tokens, "tokens");
-      
+
       // Update tokens in database
       await supabase
         .from("users")
@@ -72,7 +78,7 @@ export async function POST(request: Request) {
             azure: {
               ...scopedUser.provider.azure,
               access_token: tokens.access_token,
-              refresh_token: tokens.refresh_token
+              refresh_token: tokens.refresh_token,
             },
           },
         })
@@ -92,40 +98,40 @@ export async function POST(request: Request) {
           subject: body.note || "Time Off",
           body: {
             contentType: "text",
-            content: "Time off request"
+            content: "Time off request",
           },
           start: {
             dateTime: start,
-            timeZone: "UTC"
+            timeZone: "UTC",
           },
           end: {
             dateTime: end,
-            timeZone: "UTC"
+            timeZone: "UTC",
           },
-          categories: ["Time Off"],
-          showAs: "oof" // Mark as Out of Office
+          categories: ["Green category"],
+          showAs: "oof", // Mark as Out of Office
         },
         {
           headers: {
             Authorization: `Bearer ${tokens.access_token}`,
             "Content-Type": "application/json",
-            Prefer: 'outlook.timezone="UTC"'
+            Prefer: 'outlook.timezone="UTC"',
           },
         }
       );
 
-      console.log('Calendar response:', calendarResponse.data);
+      console.log("Calendar response:", calendarResponse.data);
       return NextResponse.json(calendarResponse.data);
     } catch (error: any) {
       console.error("API Error details:", {
         status: error.response?.status,
         data: error.response?.data,
-        headers: error.response?.headers
+        headers: error.response?.headers,
       });
 
       if (error.response?.status === 401) {
         console.log("Token expired, disconnecting Azure...");
-        
+
         await supabase
           .from("users")
           .update({
@@ -139,18 +145,26 @@ export async function POST(request: Request) {
           })
           .eq("id", body.userId);
 
-        return NextResponse.json({ 
-          error: "Token expired, please reconnect Azure",
-          details: error.response?.data?.error?.message || "No error details available"
-        }, { status: 401 });
+        return NextResponse.json(
+          {
+            error: "Token expired, please reconnect Azure",
+            details:
+              error.response?.data?.error?.message ||
+              "No error details available",
+          },
+          { status: 401 }
+        );
       }
       throw error;
     }
   } catch (error: any) {
-    console.error('Unexpected error:', error.response?.data || error);
-    return NextResponse.json({ 
-      error: "Failed to create calendar event",
-      details: error.message
-    }, { status: 500 });
+    console.error("Unexpected error:", error.response?.data || error);
+    return NextResponse.json(
+      {
+        error: "Failed to create calendar event",
+        details: error.message,
+      },
+      { status: 500 }
+    );
   }
 }

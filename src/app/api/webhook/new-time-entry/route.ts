@@ -105,7 +105,7 @@ export async function POST(request: Request) {
             dateTime: endTime.toISOString(),
             timeZone: "UTC",
           },
-          categories: ["Clockify"],
+          categories: ["Blue category"],
           singleValueExtendedProperties: [
             {
               id: "String {66f5a359-4659-4830-9070-00040ec6ac6e} Name clockifyId",
