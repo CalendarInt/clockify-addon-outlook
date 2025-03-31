@@ -13,9 +13,13 @@ import {
 
 const getBaseUrl = (workspaceId: string) => {
   console.log(`Current URL: ${window.location.href}`);
-  return process.env.NODE_ENV === "development" || window.location.href.includes('developer')
+  return process.env.NODE_ENV === "development" ||
+    window.location.href.includes("developer")
     ? `https://developer.clockify.me/report/v1/workspaces/${workspaceId}/reports/detailed`
-    : `https://reports.api.clockify.me/v1/workspaces/${workspaceId}/reports/detailed`;
+    : `https://developer.clockify.me/report/v1/workspaces/${workspaceId}/reports/detailed`;
+  // return process.env.NODE_ENV === "development" || window.location.href.includes('developer')
+  //   ? `https://developer.clockify.me/report/v1/workspaces/${workspaceId}/reports/detailed`
+  //   : `https://reports.api.clockify.me/v1/workspaces/${workspaceId}/reports/detailed`;
 };
 
 export const fetchOutlookCalendars = async (
@@ -115,15 +119,15 @@ export const syncWithOutlookCalendar = async (
       subject: entry.description,
       body: {
         contentType: "text",
-        content: entry._id
+        content: entry._id,
       },
       start: {
         dateTime: entry.timeInterval.start,
-        timeZone: "UTC"
+        timeZone: "UTC",
       },
       end: {
         dateTime: entry.timeInterval.end,
-        timeZone: "UTC"
+        timeZone: "UTC",
       },
       categories: ["Blue category"],
       singleValueExtendedProperties: [
@@ -152,20 +156,20 @@ export const syncWithOutlookCalendar = async (
     // Process each batch
     for (const batchChunk of batches) {
       await axiosInstance.post(
-        'https://graph.microsoft.com/v1.0/$batch',
+        "https://graph.microsoft.com/v1.0/$batch",
         {
-          requests: batchChunk
+          requests: batchChunk,
         },
         {
           headers: {
-            'Authorization': `Bearer ${accessToken}`,
-            'Content-Type': 'application/json'
-          }
+            Authorization: `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
         }
       );
-      
+
       // Add a small delay between batches to avoid rate limits
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      await new Promise((resolve) => setTimeout(resolve, 1000));
     }
   } catch (error) {
     console.error("Error in batch operation:", error);
