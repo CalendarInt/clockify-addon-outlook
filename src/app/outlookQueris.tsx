@@ -206,6 +206,8 @@ export const timeEntriesSyncMutation = async (
       },
     });
 
+    console.log(getBaseUrl(jwt.workspaceId));
+
     const detailedReport = await axiosInstance.post(
       getBaseUrl(jwt.workspaceId),
       {
